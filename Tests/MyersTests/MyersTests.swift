@@ -12,23 +12,10 @@ final class MyersTests: XCTestCase {
     
     func testFindMiddleSnake() {
         let a = "ABCABBA"
-        let b = "CBABAC"
-        let _maxD = maxD(a.count, b.count)
-        var vf = V(_maxD)
-        var vb = V(_maxD)
-        let oldRange = 0..<a.distance(from: a.startIndex, to: a.endIndex)
-        let newRnage = 0..<a.distance(from: b.startIndex, to: b.endIndex)
-        let (xStart, yStart) = findMiddleSnake(
-            old: a,
-            oldRange: oldRange,
-            new:  b,
-            newRange: newRnage,
-            vf: &vf,
-            vb: &vb,
-            deadline: .none
-        )!
-        XCTAssertEqual(xStart, 4)
-        XCTAssertEqual(yStart, 1)
+        let b = "ABABBAC"
+        let c = a.difference(from: b)
+        let d = a.applying(c.inverse())
+        XCTAssertEqual(d, b)
     }
 
     static var allTests = [

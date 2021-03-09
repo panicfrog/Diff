@@ -7,137 +7,230 @@
 
 import Foundation
 
-protocol Indexable { 
-    associatedtype T: Equatable
-    subscript(index: Int) -> T { get set }
-}
-
-extension String: Indexable {
-    typealias T = Character
-    subscript(index: Int) -> Character {
+private struct V {
+    @inline(__always) private static func convert(_ index: Int) -> Int {
+        return (index <= 0 ? -index : index &- 1)
+    }
+    private var v: [Int]
+    
+    init(maxDapth dapth: Int) {
+        v = Array(repeating: 0, count: dapth)
+    }
+    
+    subscript(index: Int) -> Int {
         get {
-            let idx = self.index(startIndex, offsetBy: index)
-            return self[idx]
+            return v[V.convert(index)]
         }
         set {
-            let start  = self.index(startIndex, offsetBy: index)
-            let end = self.index(after: start)
-            self.replaceSubrange(start..<end, with: [newValue])
+            v[V.convert(index)] = newValue
         }
     }
 }
 
-public struct V {
-    var offset: Int
-    var v: Array<Int>
-    
-    public init(_ maxDapth: Int) {
-        self.offset = maxDapth
-        self.v = Array(repeating: 0, count: 2 * maxDapth)
-    }
-    
-    public var count: Int {
-        return v.count
-    }
-}
-
-extension V: Indexable {
-    subscript(index: Int) -> Int {
-        set { v[index] = newValue }
-        get { return v[index] }
-    }
-}
-
-public func maxD(_ length1: Int, _ length2: Int) -> Int {
-    (length1 + length2 + 1)/2 + 1
-}
-
-extension Range where Bound == Int {
-    func split(at index: Int) -> (Range<Bound>, Range<Bound>) {
-        assert(index >= startIndex && index <= endIndex )
-        let position = startIndex.advanced(by: index)
-        return (startIndex..<position, position..<endIndex)
-    }
-}
-
-func findMiddleSnake<T: Indexable>(
-    old: T,
-    oldRange: Range<Int>,
-    new: T,
-    newRange: Range<Int>,
-    vf: inout V,
-    vb: inout V,
-    deadline: TimeInterval?
-) -> (Int, Int)? {
-    let n = oldRange.count
-    let m = newRange.count
-    let delta = n - m
-    let odd = delta & 1 == 1
-    vf[1] = 0
-    vb[1] = 0
-    let dMax = maxD(n, m)
-    for d in 0..<dMax {
-        if let deadline = deadline, Date().timeIntervalSince1970 < deadline {
-            break
-        }
+private func diff<C,D>(
+    from old: C,
+    to new: D,
+    cmp: (C.Element, D.Element) -> Bool
+) -> [DiffOp]
+where
+    C: BidirectionalCollection,
+    D: BidirectionalCollection,
+    C.Element == D.Element
+{
+    func help(from a: UnsafeBufferPointer<C.Element>, to b: UnsafeBufferPointer<D.Element>) -> [V] {
+        let n = a.count
+        let m = b.count
+        let max = n + m
+        var result = [V]()
+        var v = V(maxDapth: max)
+        v[1] = 0
         
-        for k in stride(from: d, to: -d, by: -2) {
-            var x: Int
-            if k == -d || (k != d && vf[k-1] < vf[k+1]){
-                x = vf[k+1]
-            } else {
-                x = vf[k-1] + 1
-            }
-            let y = x - k
-            let (x0, y0) = (x, y)
-            if x < oldRange.count && y < newRange.count {
-                let advance = commonPrefixCount(
-                    old: old,
-                    oldRange: oldRange.index(oldRange.startIndex, offsetBy: x)..<oldRange.endIndex,
-                    new: new,
-                    newRange: newRange.index(newRange.startIndex, offsetBy: y)..<newRange.endIndex
-                )
-                x += advance
-            }
-            vf[k] = x;
+        var x = 0
+        var y = 0
+        it: for d in 0...max {
+            let preV = v
+            result.append(v)
+            v = V(maxDapth: d)
             
-            if odd && abs(k - delta) <= (d-1) {
-                if vf[k] + vb[-(k-delta)] >= n {
-                    return (x0 + oldRange.startIndex, y0 + newRange.startIndex)
+            for k in stride(from: -d, through: d, by: 2) {
+                if k == -d {
+                    x = preV[k &+ 1]
+                } else {
+                    let km = preV[k &- 1]
+                    if k != d {
+                        let kp = preV[k &+ 1]
+                        x =  km < kp ? kp : km &+ 1
+                    } else {
+                        x = km &+ 1
+                    }
+                }
+                y = x &- k
+                while x < n && y < m {
+                    if !cmp(a[x], b[y]) {
+                        break
+                    }
+                    x &+= 1
+                    y &+= 1
+                }
+                v[k] = x
+                if x >= n && y >= m {
+                    break it
                 }
             }
-        }
-        
-        for k in stride(from: d, to: -d, by: -2) {
-            var x: Int
-            if k == -d || (k != d &&  vb[k-1] < vb[k+1]) {
-                x = vb[k+1]
-            } else {
-                x = vb[k-1] + 1
-            }
-            var y = x - k
-            
-            if x < n && y < m {
-                let advance = commonSuffixCount(
-                    old: old,
-                    oldRnage: oldRange.startIndex..<oldRange.startIndex.advanced(by: n-x),
-                    new: new,
-                    newRange: newRange.startIndex..<newRange.startIndex.advanced(by: m-y)
-                )
-                x += advance
-                y += advance
-            }
-            vb[k] = x
-            
-            if !odd && abs(k - delta) <= d {
-                if vb[k] + vf[-(k-delta)]  >= n {
-                    return (n - x + oldRange.startIndex, m - y + newRange.startIndex)
-                }
+            if x >= n && y >= m {
+                break
             }
         }
+        return result
     }
-    return .none
+    
+    func _withContiguousStorage<C: Collection, R>(
+        for values: C,
+        _ body: (UnsafeBufferPointer<C.Element>) throws -> R
+      ) rethrows -> R {
+        if let result = try values.withContiguousStorageIfAvailable(body) { return result }
+        let array = ContiguousArray(values)
+        return try array.withUnsafeBufferPointer(body)
+      }
+    
+    // TODO:
+    return []
 }
+
+//import Foundation
+//
+//protocol Indexable {
+//    associatedtype T: Equatable
+//    subscript(index: Int) -> T { get set }
+//}
+//
+//extension String: Indexable {
+//    typealias T = Character
+//    subscript(index: Int) -> Character {
+//        get {
+//            let idx = self.index(startIndex, offsetBy: index)
+//            return self[idx]
+//        }
+//        set {
+//            let start  = self.index(startIndex, offsetBy: index)
+//            let end = self.index(after: start)
+//            self.replaceSubrange(start..<end, with: [newValue])
+//        }
+//    }
+//}
+//
+//public struct V {
+//    var offset: Int
+//    var v: Array<Int>
+//
+//    public init(_ maxDapth: Int) {
+//        self.offset = maxDapth
+//        self.v = Array(repeating: 0, count: 2 * maxDapth)
+//    }
+//
+//    public var count: Int {
+//        return v.count
+//    }
+//}
+//
+//extension V: Indexable {
+//    subscript(index: Int) -> Int {
+//        set { v[index] = newValue }
+//        get { return v[index] }
+//    }
+//}
+//
+//public func maxD(_ length1: Int, _ length2: Int) -> Int {
+//
+//    (length1 + length2 + 1)/2 + 1
+//}
+//
+//extension Range where Bound == Int {
+//    func split(at index: Int) -> (Range<Bound>, Range<Bound>) {
+//        assert(index >= startIndex && index <= endIndex )
+//        let position = startIndex.advanced(by: index)
+//        return (startIndex..<position, position..<endIndex)
+//    }
+//}
+//
+//func findMiddleSnake<T: Indexable>(
+//    old: T,
+//    oldRange: Range<Int>,
+//    new: T,
+//    newRange: Range<Int>,
+//    vf: inout V,
+//    vb: inout V,
+//    deadline: TimeInterval?
+//) -> (Int, Int)? {
+//    let n = oldRange.count
+//    let m = newRange.count
+//    let delta = n - m
+//    let odd = delta & 1 == 1
+//    vf[1] = 0
+//    vb[1] = 0
+//    let dMax = maxD(n, m)
+//    for d in 0..<dMax {
+//        if let deadline = deadline, Date().timeIntervalSince1970 < deadline {
+//            break
+//        }
+//
+//        for k in stride(from: d, to: -d, by: -2) {
+//            var x: Int
+//            if k == -d || (k != d && vf[k-1] < vf[k+1]){
+//                x = vf[k+1]
+//            } else {
+//                x = vf[k-1] + 1
+//            }
+//            let y = x - k
+//            let (x0, y0) = (x, y)
+//            if x < oldRange.count - 1 && y < newRange.count - 1 {
+//                let advance = commonPrefixCount(
+//                    old: old,
+//                    oldRange: oldRange.index(oldRange.startIndex, offsetBy: x)..<oldRange.endIndex,
+//                    new: new,
+//                    newRange: newRange.index(newRange.startIndex, offsetBy: y)..<newRange.endIndex
+//                )
+//                x += advance
+//            }
+//            vf[k] = x;
+//
+//            if odd && abs(k - delta) <= (d-1) {
+//                if vf[k] + vb[-(k-delta)] >= n {
+//                    return (x0 + oldRange.startIndex, y0 + newRange.startIndex)
+//                }
+//            }
+//        }
+//
+//        for k in stride(from: d, to: -d, by: -2) {
+//            var x: Int
+//            if k == -d || (k != d &&  vb[k-1] < vb[k+1]) {
+//                x = vb[k+1]
+//            } else {
+//                x = vb[k-1] + 1
+//            }
+//            var y = x - k
+//
+//            if x < n && y < m {
+//                let advance = commonSuffixCount(
+//                    old: old,
+//                    oldRnage: oldRange.startIndex..<oldRange.startIndex.advanced(by: n-x),
+//                    new: new,
+//                    newRange: newRange.startIndex..<newRange.startIndex.advanced(by: m-y)
+//                )
+//                x += advance
+//                y += advance
+//            }
+//            vb[k] = x
+//
+//            if !odd && abs(k - delta) <= d {
+//                if vb[k] + vf[-(k-delta)]  >= n {
+//                    return (n - x + oldRange.startIndex, m - y + newRange.startIndex)
+//                }
+//            }
+//        }
+//    }
+//    return .none
+//}
 
 //public struct Myers<E: Equatable> {
 //    public static func calculateShortestEditDistance(from fromArray: Array<E>, to toArray: Array<E>) -> Array<Int> {
