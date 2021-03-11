@@ -14,7 +14,7 @@ private struct V {
     private var v: [Int]
     
     init(maxDapth dapth: Int) {
-        v = Array(repeating: 0, count: dapth)
+        v = Array(repeating: 0, count: dapth + 1)
     }
     
     subscript(index: Int) -> Int {
@@ -27,11 +27,11 @@ private struct V {
     }
 }
 
-private func diff<C,D>(
+private func _diff<C,D>(
     from old: C,
     to new: D,
     cmp: (C.Element, D.Element) -> Bool
-) -> [DiffOp]
+) -> [SingleDiffOp]
 where
     C: BidirectionalCollection,
     D: BidirectionalCollection,
@@ -41,8 +41,9 @@ where
         let n = a.count
         let m = b.count
         let max = n + m
+        
         var result = [V]()
-        var v = V(maxDapth: max)
+        var v = V(maxDapth: 1)
         v[1] = 0
         
         var x = 0
@@ -57,22 +58,30 @@ where
                     x = preV[k &+ 1]
                 } else {
                     let km = preV[k &- 1]
+                    
                     if k != d {
                         let kp = preV[k &+ 1]
-                        x =  km < kp ? kp : km &+ 1
+                        if km < kp {
+                            x = kp
+                        } else {
+                            x = km &+ 1
+                        }
                     } else {
                         x = km &+ 1
                     }
                 }
                 y = x &- k
+                
                 while x < n && y < m {
                     if !cmp(a[x], b[y]) {
-                        break
+                        break;
                     }
                     x &+= 1
                     y &+= 1
                 }
+                
                 v[k] = x
+                
                 if x >= n && y >= m {
                     break it
                 }
@@ -84,17 +93,54 @@ where
         return result
     }
     
+    func _fromChanges(
+        from a: UnsafeBufferPointer<C.Element>,
+        to b: UnsafeBufferPointer<D.Element>,
+        using trace: [V]
+    ) -> [SingleDiffOp] {
+        var changes = [SingleDiffOp]()
+        var x = a.count
+        var y = b.count
+        
+        for d in stride(from: trace.count &- 1, to: 0, by: -1) {
+            let v = trace[d]
+            let k = x &- y
+            let preK = (k == -d || (k != d && v[k &- 1] < v[k &+ 1])) ? k &+ 1 : k &- 1
+            let preX = v[preK]
+            let preY = preX &- preK
+            
+            while x > preX && y > preY {
+                x &-= 1
+                y &-= 1
+            }
+            
+            if y != preY {
+                changes.append(.insert(index: x))
+            } else {
+                changes.append(.delete(index: x))
+            }
+        }
+        return changes
+    }
+    
     func _withContiguousStorage<C: Collection, R>(
         for values: C,
         _ body: (UnsafeBufferPointer<C.Element>) throws -> R
-      ) rethrows -> R {
+    ) rethrows -> R {
         if let result = try values.withContiguousStorageIfAvailable(body) { return result }
         let array = ContiguousArray(values)
         return try array.withUnsafeBufferPointer(body)
-      }
+    }
     
-    // TODO:
-    return []
+    let _old = _withContiguousStorage(for: old) { $0 }
+    let _new = _withContiguousStorage(for: new) { $0 }
+    return  _fromChanges(from: _old, to: _new, using: help(from: _old, to: _new)) 
+}
+
+extension BidirectionalCollection where Element: Equatable {
+    public func diff<C: BidirectionalCollection>(from: C) -> [SingleDiffOp] where Element == C.Element {
+        return _diff(from: from, to: self, cmp: ==)
+    }
 }
 
 //import Foundation

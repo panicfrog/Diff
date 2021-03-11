@@ -11,11 +11,13 @@ final class MyersTests: XCTestCase {
     }
     
     func testFindMiddleSnake() {
-        let a = "ABCABBA"
-        let b = "ABABBAC"
-        let c = a.difference(from: b)
-        let d = a.applying(c.inverse())
-        XCTAssertEqual(d, b)
+        let a = ["A","B","C", "A", "B", "B", "A"]
+        let b = ["A", "B", "A", "B", "B", "A", "C"]
+        let ops = a.diff(from: b)
+        print(ops)
+//        let c = a.difference(from: b)
+//        let d = a.applying(c.inverse())
+//        XCTAssertEqual(d, b)
     }
 
     static var allTests = [

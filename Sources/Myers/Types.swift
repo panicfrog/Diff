@@ -7,6 +7,11 @@
 
 import Foundation
 
+public enum SingleDiffOp {
+    case insert(index: Int)
+    case delete(index: Int)
+}
+
 public enum DiffOp {
     case equal(oldIndex: Int, newIndex: Int, length: Int)
     case delete(oldIndex: Int, newIndex: Int, length: Int)
